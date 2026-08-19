@@ -30,12 +30,43 @@ function shortLabel(dStr) {
   return d.toLocaleDateString([], { weekday: "short" }).slice(0, 3) + " " + d.getDate();
 }
 
+// Downscales + re-encodes as JPEG so phone camera photos (often 5-15MB) stay
+// well under Vercel's serverless function payload limit (4.5MB).
+const MAX_DIMENSION = 1280;
+const JPEG_QUALITY = 0.8;
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result.split(",")[1]);
-    r.onerror = () => reject(new Error("Could not read image"));
-    r.readAsDataURL(file);
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let { width, height } = img;
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+        if (width > height) {
+          height = Math.round((height * MAX_DIMENSION) / width);
+          width = MAX_DIMENSION;
+        } else {
+          width = Math.round((width * MAX_DIMENSION) / height);
+          height = MAX_DIMENSION;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+
+      const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+      resolve(dataUrl.split(",")[1]);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read image"));
+    };
+    img.src = objectUrl;
   });
 }
 
@@ -467,8 +498,7 @@ export default function App() {
 
     try {
       const base64 = await fileToBase64(file);
-      const mediaType = file.type || "image/jpeg";
-      const result = await analyzeMealImage(base64, mediaType);
+      const result = await analyzeMealImage(base64, "image/jpeg");
       const items = normalizeItems(result.items);
       setMeals((prev) => prev.map((m) => (m.id === id ? { ...m, status: "done", items, note: result.note } : m)));
     } catch (err) {
