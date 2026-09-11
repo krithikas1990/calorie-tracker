@@ -5,6 +5,15 @@ This project has two parts:
 - **`backend/`** — a tiny server that holds your Anthropic API key privately and talks to Claude on the app's behalf. Lives on the internet (Vercel), not on your phone.
 - **`app/`** — the actual app the user sees. Built with React, wrapped into a real Android app with Capacitor.
 
+## Features
+
+- **Photo-based meal logging** — take a photo of a plate, Claude's vision API identifies each food item and estimates calories/protein/carbs/fat/fiber from visual portion cues (plate size, utensils, etc.)
+- **Editable estimates** — tap any weight to correct the AI's guess if it looks off, with a one-tap reset back to the original estimate
+- **Daily goals & progress** — set your own calorie/macro targets, see progress bars fill in as you log meals
+- **14-day trends** — a bar chart of daily calories against your goal, plus average macros on days you actually logged something
+- **AI nutrition coach (Coach tab)** — ask questions in plain English about your actual logged data ("how was my protein this week?"). Answers are grounded strictly in your real logged meals and history — it will say so honestly rather than invent numbers if you haven't logged anything yet.
+- **Private by design** — your Anthropic API key lives only on the backend server (Vercel), never on the phone; all your meal data is stored locally on-device, not in any cloud database
+
 Follow the phases in order. Don't skip ahead — each one depends on the last working.
 
 ---
@@ -121,6 +130,16 @@ When it finishes, click the notification to locate the `.apk` file. You can send
 To eventually publish it on the Google Play Store, you'd need a one-time $25 Google Play developer account and a signed release build — happy to walk through that when you're ready.
 
 ---
+
+## Adding new backend features
+
+If you add a new file to `backend/api/` (like a new endpoint), it won't show up on your live app until you redeploy:
+
+```
+cd backend
+vercel --prod
+```
+This pushes the current `backend/` folder to your existing Vercel project (same URL, no `.env` changes needed) — no need to reconfigure anything, just run this command whenever you add or change backend code.
 
 ## If something goes wrong
 
