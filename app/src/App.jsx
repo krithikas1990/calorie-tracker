@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip, CartesianGrid, Cell } from "recharts";
 import { storageGet, storageSet } from "./storage.js";
+import { Filesystem, Directory } from "@capacitor/filesystem";
 
 // Point this at your deployed backend (see README). During local testing
 // this defaults to your local dev server.
@@ -68,6 +69,27 @@ function fileToBase64(file) {
     };
     img.src = objectUrl;
   });
+}
+
+// Meal photos are saved as files on the device, so they survive app restarts.
+const PHOTO_DIR = "meal-photos";
+
+async function savePhoto(id, base64) {
+  const path = `${PHOTO_DIR}/${id}.jpg`;
+  await Filesystem.writeFile({ path, data: base64, directory: Directory.Data, recursive: true });
+  return path;
+}
+
+async function loadPhoto(path) {
+  const { data } = await Filesystem.readFile({ path, directory: Directory.Data });
+  if (typeof data === "string") return `data:image/jpeg;base64,${data}`;
+  return URL.createObjectURL(data);
+}
+
+async function deletePhoto(path) {
+  try {
+    await Filesystem.deleteFile({ path, directory: Directory.Data });
+  } catch (e) {}
 }
 
 // Calls YOUR backend (not Anthropic directly) so the API key never lives on the phone.
@@ -252,6 +274,32 @@ const stepperBtnStyle = {
   border: `1px solid ${INK}`, background: PAPER, cursor: "pointer", padding: 0,
 };
 
+function MealPhoto({ meal }) {
+  const [src, setSrc] = useState(meal.photoPath ? null : meal.imageUrl);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (meal.photoPath) {
+      loadPhoto(meal.photoPath)
+        .then((url) => { if (!cancelled) { setSrc(url); setFailed(false); } })
+        .catch(() => { if (!cancelled) setFailed(true); });
+    }
+    return () => { cancelled = true; };
+  }, [meal.photoPath]);
+
+  const boxStyle = { width: 72, height: 72, border: `2px solid ${INK}`, flexShrink: 0 };
+
+  if (failed || !src) {
+    return (
+      <div style={{ ...boxStyle, display: "flex", alignItems: "center", justifyContent: "center", background: "#E8E4D8", color: MUTED }}>
+        <Camera size={20} />
+      </div>
+    );
+  }
+  return <img src={src} alt="meal" onError={() => setFailed(true)} style={{ ...boxStyle, objectFit: "cover" }} />;
+}
+
 function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem }) {
   const [open, setOpen] = useState(false);
   const totals = useMemo(() => sumMeal(meal.items || []), [meal.items]);
@@ -259,7 +307,7 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem }) {
   return (
     <div style={{ background: PAPER, border: `2px solid ${INK}`, marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 12, padding: 12 }}>
-        <img src={meal.imageUrl} alt="meal" style={{ width: 72, height: 72, objectFit: "cover", border: `2px solid ${INK}`, flexShrink: 0 }} />
+        <MealPhoto meal={meal} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>{meal.time}</div>
@@ -628,6 +676,12 @@ export default function App() {
 
     try {
       const base64 = await fileToBase64(file);
+      try {
+        const photoPath = await savePhoto(id, base64);
+        setMeals((prev) => prev.map((m) => (m.id === id ? { ...m, photoPath } : m)));
+      } catch (e) {
+        console.error("Photo save failed", e);
+      }
       const result = await analyzeMealImage(base64, "image/jpeg");
       const items = normalizeItems(result.items);
       setMeals((prev) => prev.map((m) => (m.id === id ? { ...m, status: "done", items, note: result.note } : m)));
@@ -636,7 +690,11 @@ export default function App() {
     }
   };
 
-  const handleDelete = (id) => setMeals((prev) => prev.filter((m) => m.id !== id));
+  const handleDelete = (id) => {
+    const meal = meals.find((m) => m.id === id);
+    if (meal && meal.photoPath) deletePhoto(meal.photoPath);
+    setMeals((prev) => prev.filter((m) => m.id !== id));
+  };
 
   const handleUpdateItemGrams = (mealId, itemIdx, newGrams) => {
     setMeals((prev) =>
@@ -669,6 +727,7 @@ export default function App() {
   };
 
   const handleResetToday = () => {
+    meals.forEach((m) => m.photoPath && deletePhoto(m.photoPath));
     setMeals([]);
     setShowGoals(false);
   };
