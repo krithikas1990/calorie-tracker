@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   Camera, Trash2, Loader2, ChevronDown, ChevronUp, AlertCircle,
-  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays,
+  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip, CartesianGrid, Cell } from "recharts";
 import { storageGet, storageSet } from "./storage.js";
@@ -426,7 +426,75 @@ function GoalsModal({ goals, onSave, onClose, onResetToday }) {
   );
 }
 
+function DayDetail({ date, onBack }) {
+  const [dayMeals, setDayMeals] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await storageGet(`day:${date}`);
+        const parsed = d && d.value ? JSON.parse(d.value) : [];
+        setDayMeals(parsed.filter((m) => m.status === "done"));
+      } catch (e) {
+        setDayMeals([]);
+      }
+    })();
+  }, [date]);
+
+  const totals = useMemo(() => sumDay(dayMeals || []), [dayMeals]);
+  const heading = new Date(date + "T00:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+  const count = (dayMeals || []).length;
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: INK, padding: 0, marginBottom: 12 }}>
+        <ChevronLeft size={14} /> BACK TO TRENDS
+      </button>
+
+      <div style={{ background: PAPER, border: `3px solid ${INK}`, padding: 16, marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>{heading.toUpperCase()}</div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 40, fontWeight: 700, color: INK, lineHeight: 1.1 }}>{Math.round(totals.calories)}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: INK }}>KCAL · {count} MEAL{count !== 1 ? "S" : ""}</div>
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
+          Protein {Math.round(totals.protein)}g · Carbs {Math.round(totals.carbs)}g · Fat {Math.round(totals.fat)}g · Fiber {Math.round(totals.fiber)}g
+        </div>
+      </div>
+
+      {dayMeals === null && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, color: MUTED, fontSize: 12 }}>
+          <Loader2 size={14} className="spin" /> Loading…
+        </div>
+      )}
+
+      {dayMeals && dayMeals.length === 0 && (
+        <div style={{ border: "2px dashed #C9C4B4", padding: "24px 16px", textAlign: "center", color: "#A39E8F", fontSize: 13 }}>
+          No meals saved for this day.
+        </div>
+      )}
+
+      {(dayMeals || []).map((meal) => (
+        <div key={meal.id} style={{ background: PAPER, border: `2px solid ${INK}`, marginBottom: 12, padding: 12, display: "flex", gap: 12 }}>
+          <MealPhoto meal={meal} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>{meal.time}</div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 700, color: INK, lineHeight: 1.2 }}>
+              {Math.round(sumMeal(meal.items).calories)} <span style={{ fontSize: 12, fontFamily: "'Archivo', sans-serif", fontWeight: 700, color: MUTED }}>KCAL</span>
+            </div>
+            {(meal.items || []).map((it, idx) => (
+              <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: INK, borderTop: "1px dashed #D8D3C4", padding: "4px 0" }}>
+                <span>{it.name}</span>
+                <span style={{ color: MUTED, whiteSpace: "nowrap" }}>{Math.round(it.estimated_grams)}g · {Math.round(it.calories)} kcal</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TrendsView({ historySummary, goals }) {
+  const [selectedDate, setSelectedDate] = useState(null);
   const days = useMemo(() => {
     const arr = [];
     for (let i = 13; i >= 0; i--) {
@@ -450,6 +518,8 @@ function TrendsView({ historySummary, goals }) {
 
   const loggedDays = days.filter((d) => d.logged);
   const avg = (key) => (loggedDays.length > 0 ? loggedDays.reduce((s, d) => s + d[key], 0) / loggedDays.length : 0);
+
+  if (selectedDate) return <DayDetail date={selectedDate} onBack={() => setSelectedDate(null)} />;
 
   return (
     <div>
@@ -490,9 +560,16 @@ function TrendsView({ historySummary, goals }) {
       <div>
         <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED, marginBottom: 10 }}>DAY BY DAY</div>
         {[...days].reverse().map((d) => (
-          <div key={d.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px dashed #D8D3C4", fontFamily: "'Archivo', sans-serif" }}>
+          <div
+            key={d.date}
+            onClick={() => d.logged && setSelectedDate(d.date)}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px dashed #D8D3C4", fontFamily: "'Archivo', sans-serif", cursor: d.logged ? "pointer" : "default" }}
+          >
             <span style={{ fontSize: 12, color: INK, fontWeight: 600 }}>{d.label}</span>
-            <span style={{ fontSize: 12, color: d.logged ? INK : "#C9C4B4", fontWeight: 700 }}>{d.logged ? `${d.calories} kcal` : "No log"}</span>
+            <span style={{ fontSize: 12, color: d.logged ? INK : "#C9C4B4", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+              {d.logged ? `${d.calories} kcal` : "No log"}
+              {d.logged && <ChevronRight size={14} />}
+            </span>
           </div>
         ))}
       </div>
