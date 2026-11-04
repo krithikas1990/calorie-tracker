@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   Camera, Trash2, Loader2, ChevronDown, ChevronUp, AlertCircle,
-  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight,
+  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight, Pencil,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip, CartesianGrid, Cell } from "recharts";
 import { storageGet, storageSet } from "./storage.js";
@@ -123,6 +123,18 @@ async function askCoach(question, context) {
   return parsed2.answer;
 }
 
+async function fetchNutrition(name) {
+  const response = await fetch(`${BACKEND_URL}/api/nutrition`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error(`Nutrition lookup failed (${response.status})`);
+  const parsed = await response.json();
+  if (!parsed.per_100g) throw new Error("Malformed response from server");
+  return parsed.per_100g;
+}
+
 function normalizeItems(rawItems) {
   return rawItems.map((it) => {
     const grams = Number(it.estimated_grams) || 0;
@@ -213,9 +225,29 @@ function MacroBar({ label, grams, maxGrams, color }) {
   );
 }
 
-function EditableGramRow({ item, onChange, onReset }) {
+function EditableGramRow({ item, onChange, onReset, onRename }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(Math.round(item.estimated_grams)));
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(item.name);
+  const [renameStatus, setRenameStatus] = useState(null);
+
+  const commitName = async () => {
+    const newName = nameDraft.trim();
+    setEditingName(false);
+    if (!newName || newName === item.name) {
+      setNameDraft(item.name);
+      return;
+    }
+    setRenameStatus("saving");
+    try {
+      await onRename(newName);
+      setRenameStatus(null);
+    } catch (e) {
+      setNameDraft(item.name);
+      setRenameStatus("error");
+    }
+  };
 
   useEffect(() => setDraft(String(Math.round(item.estimated_grams))), [item.estimated_grams]);
 
@@ -231,9 +263,35 @@ function EditableGramRow({ item, onChange, onReset }) {
   return (
     <div style={{ padding: "6px 0", borderTop: "1px dashed #D8D3C4" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: INK }}>
-        <span style={{ flex: 1 }}>{item.name}</span>
-        <span style={{ fontWeight: 700, marginLeft: 8 }}>{Math.round(item.calories)} kcal</span>
+        {editingName ? (
+          <input
+            autoFocus
+            type="text"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+            style={{ flex: 1, fontSize: 12, border: `1px solid ${INK}`, padding: "2px 4px", fontFamily: "'Archivo', sans-serif" }}
+          />
+        ) : (
+          <button
+            onClick={() => { setNameDraft(item.name); setRenameStatus(null); setEditingName(true); }}
+            disabled={renameStatus === "saving"}
+            style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontSize: 12, color: INK, fontFamily: "'Archivo', sans-serif" }}
+            aria-label="Rename item"
+          >
+            {item.name} <Pencil size={11} color={MUTED} />
+          </button>
+        )}
+        <span style={{ fontWeight: 700, marginLeft: 8 }}>
+          {renameStatus === "saving" ? <Loader2 size={12} className="spin" /> : `${Math.round(item.calories)} kcal`}
+        </span>
       </div>
+      {renameStatus === "error" && (
+        <div style={{ fontSize: 10, color: MACRO_COLORS.protein, marginTop: 2 }}>
+          Couldn't look up that food. Check your connection and try again.
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
         <button onClick={() => onChange(Math.max(0, item.estimated_grams - 10))} style={stepperBtnStyle} aria-label="Decrease grams">
           <Minus size={12} />
@@ -300,7 +358,7 @@ function MealPhoto({ meal }) {
   return <img src={src} alt="meal" onError={() => setFailed(true)} style={{ ...boxStyle, objectFit: "cover" }} />;
 }
 
-function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem }) {
+function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem }) {
   const [open, setOpen] = useState(false);
   const totals = useMemo(() => sumMeal(meal.items || []), [meal.items]);
 
@@ -365,7 +423,7 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem }) {
               TAP A WEIGHT TO CORRECT THE ESTIMATE
             </div>
             {meal.items.map((it, idx) => (
-              <EditableGramRow key={idx} item={it} onChange={(g) => onUpdateItemGrams(meal.id, idx, g)} onReset={() => onResetItem(meal.id, idx)} />
+              <EditableGramRow key={idx} item={it} onChange={(g) => onUpdateItemGrams(meal.id, idx, g)} onReset={() => onResetItem(meal.id, idx)} onRename={(name) => onRenameItem(meal.id, idx, name)} />
             ))}
           </div>
 
@@ -793,6 +851,28 @@ export default function App() {
     );
   };
 
+  const handleRenameItem = async (mealId, itemIdx, newName) => {
+    const per100 = await fetchNutrition(newName);
+    const perGram = {
+      calories: (per100.calories || 0) / 100,
+      protein: (per100.protein_g || 0) / 100,
+      carbs: (per100.carbs_g || 0) / 100,
+      fat: (per100.fat_g || 0) / 100,
+      fiber: (per100.fiber_g || 0) / 100,
+    };
+    setMeals((prev) =>
+      prev.map((m) => {
+        if (m.id !== mealId) return m;
+        const items = m.items.map((it, idx) =>
+          idx === itemIdx
+            ? recomputeItem({ ...it, name: newName, ai_name: it.ai_name || it.name, perGram }, it.estimated_grams)
+            : it
+        );
+        return { ...m, items };
+      })
+    );
+  };
+
   const handleSaveGoals = async (newGoals) => {
     setGoals(newGoals);
     setShowGoals(false);
@@ -893,7 +973,7 @@ export default function App() {
             )}
 
             {meals.map((meal) => (
-              <MealCard key={meal.id} meal={meal} onDelete={handleDelete} onUpdateItemGrams={handleUpdateItemGrams} onResetItem={handleResetItem} />
+              <MealCard key={meal.id} meal={meal} onDelete={handleDelete} onUpdateItemGrams={handleUpdateItemGrams} onResetItem={handleResetItem} onRenameItem={handleRenameItem} />
             ))}
 
             <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 10, color: "#A39E8F", marginTop: 20, textAlign: "center", lineHeight: 1.5 }}>
