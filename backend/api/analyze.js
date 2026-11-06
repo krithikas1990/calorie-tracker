@@ -17,6 +17,20 @@ Respond with ONLY valid JSON, no markdown fences, no preamble, in exactly this s
 }
 Numbers must be plain numbers (no units, no strings). If you cannot identify any food, return {"items": [], "note": "explain why"}.`;
 
+function buildUserText(knownFoods) {
+  let text = "Analyze this meal and return the JSON as instructed.";
+  if (Array.isArray(knownFoods) && knownFoods.length > 0) {
+    const lines = knownFoods
+      .filter((f) => f && typeof f.to === "string" && typeof f.from === "string")
+      .slice(0, 60)
+      .map((f) => `- "${f.from.slice(0, 80)}" is called "${f.to.slice(0, 80)}" in this household`);
+    if (lines.length > 0) {
+      text += `\n\nThis household has corrected food names before:\n${lines.join("\n")}\nIf a dish in the photo matches one of these, use the household's name for it and give nutrition for that dish. Only use these names when the dish genuinely matches; otherwise identify foods normally.`;
+    }
+  }
+  return text;
+}
+
 export default async function handler(req, res) {
   // Allow the Android app (and your browser during testing) to call this.
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -26,7 +40,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { image, mediaType } = req.body || {};
+  const { image, mediaType, knownFoods } = req.body || {};
   if (!image) return res.status(400).json({ error: "No image provided" });
 
   try {
@@ -46,7 +60,7 @@ export default async function handler(req, res) {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: mediaType || "image/jpeg", data: image } },
-              { type: "text", text: "Analyze this meal and return the JSON as instructed." },
+              { type: "text", text: buildUserText(knownFoods) },
             ],
           },
         ],

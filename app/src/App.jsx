@@ -93,11 +93,11 @@ async function deletePhoto(path) {
 }
 
 // Calls YOUR backend (not Anthropic directly) so the API key never lives on the phone.
-async function analyzeMealImage(base64Data, mediaType) {
+async function analyzeMealImage(base64Data, mediaType, knownFoods = []) {
   const response = await fetch(`${BACKEND_URL}/api/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image: base64Data, mediaType }),
+    body: JSON.stringify({ image: base64Data, mediaType, knownFoods }),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -434,7 +434,7 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem
   );
 }
 
-function GoalsModal({ goals, onSave, onClose, onResetToday }) {
+function GoalsModal({ goals, onSave, onClose, onResetToday, foodDictionary = [], onRemoveFood }) {
   const [draft, setDraft] = useState(goals);
 
   const field = (key, label, unit) => (
@@ -479,6 +479,22 @@ function GoalsModal({ goals, onSave, onClose, onResetToday }) {
         >
           CLEAR TODAY'S MEALS
         </button>
+
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: MUTED, marginBottom: 6 }}>MY FOOD NAMES</div>
+          {foodDictionary.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#A39E8F" }}>Rename a food item in any meal and it will be remembered here.</div>
+          ) : (
+            foodDictionary.map((f) => (
+              <div key={f.from} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderTop: "1px dashed #D8D3C4", fontSize: 12, color: INK }}>
+                <span><strong>{f.to}</strong> <span style={{ color: MUTED }}>(AI said "{f.from}")</span></span>
+                <button onClick={() => onRemoveFood(f.from)} style={{ background: "none", border: "none", cursor: "pointer", color: MUTED, padding: 2 }} aria-label={`Forget ${f.to}`}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
@@ -753,6 +769,7 @@ function CoachView({ meals, historySummary, goals }) {
 export default function App() {
   const [meals, setMeals] = useState([]);
   const [goals, setGoals] = useState(DEFAULT_GOALS);
+  const [foodDictionary, setFoodDictionary] = useState([]);
   const [historySummary, setHistorySummary] = useState({});
   const [tab, setTab] = useState("today");
   const [showGoals, setShowGoals] = useState(false);
@@ -765,6 +782,10 @@ export default function App() {
       try {
         const g = await storageGet("goals");
         if (g && g.value) setGoals(JSON.parse(g.value));
+      } catch (e) {}
+      try {
+        const fd = await storageGet("food-dictionary");
+        if (fd && fd.value) setFoodDictionary(JSON.parse(fd.value));
       } catch (e) {}
       try {
         const h = await storageGet("history-summary");
@@ -817,7 +838,7 @@ export default function App() {
       } catch (e) {
         console.error("Photo save failed", e);
       }
-      const result = await analyzeMealImage(base64, "image/jpeg");
+      const result = await analyzeMealImage(base64, "image/jpeg", foodDictionary);
       const items = normalizeItems(result.items);
       setMeals((prev) => prev.map((m) => (m.id === id ? { ...m, status: "done", items, note: result.note } : m)));
     } catch (err) {
@@ -851,8 +872,33 @@ export default function App() {
     );
   };
 
+  const saveFoodDictionary = async (next) => {
+    setFoodDictionary(next);
+    try {
+      await storageSet("food-dictionary", JSON.stringify(next));
+    } catch (e) {
+      console.error("Could not save food dictionary", e);
+    }
+  };
+
+  const handleRemoveFood = (fromName) => {
+    saveFoodDictionary(foodDictionary.filter((f) => f.from !== fromName));
+  };
+
   const handleRenameItem = async (mealId, itemIdx, newName) => {
     const per100 = await fetchNutrition(newName);
+    const meal = meals.find((m) => m.id === mealId);
+    const item = meal && meal.items[itemIdx];
+    const fromName = item ? (item.ai_name || item.name).trim() : null;
+    if (fromName) {
+      const key = fromName.toLowerCase();
+      const others = foodDictionary.filter((f) => f.from.trim().toLowerCase() !== key);
+      if (key === newName.trim().toLowerCase()) {
+        saveFoodDictionary(others);
+      } else {
+        saveFoodDictionary([{ from: fromName, to: newName.trim() }, ...others]);
+      }
+    }
     const perGram = {
       calories: (per100.calories || 0) / 100,
       protein: (per100.protein_g || 0) / 100,
@@ -987,7 +1033,7 @@ export default function App() {
         )}
       </div>
 
-      {showGoals && <GoalsModal goals={goals} onSave={handleSaveGoals} onClose={() => setShowGoals(false)} onResetToday={handleResetToday} />}
+      {showGoals && <GoalsModal goals={goals} onSave={handleSaveGoals} onClose={() => setShowGoals(false)} onResetToday={handleResetToday} foodDictionary={foodDictionary} onRemoveFood={handleRemoveFood} />}
     </div>
   );
 }
