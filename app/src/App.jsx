@@ -4,7 +4,7 @@ import {
   Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight, Pencil, Check,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip, CartesianGrid, Cell } from "recharts";
-import { storageGet, storageSet } from "./storage.js";
+import { storageGet, storageSet, storageDelete } from "./storage.js";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 
 // Point this at your deployed backend (see README). During local testing
@@ -90,6 +90,22 @@ async function deletePhoto(path) {
   try {
     await Filesystem.deleteFile({ path, directory: Directory.Data });
   } catch (e) {}
+}
+
+// Deletes the given days completely: meals, photos, and their summary entries.
+async function deleteDays(dateKeys, historySummary) {
+  const nextSummary = { ...historySummary };
+  for (const key of dateKeys) {
+    try {
+      const d = await storageGet(`day:${key}`);
+      const parsed = d && d.value ? JSON.parse(d.value) : [];
+      for (const m of parsed) if (m.photoPath) await deletePhoto(m.photoPath);
+    } catch (e) {}
+    try { await storageDelete(`day:${key}`); } catch (e) {}
+    delete nextSummary[key];
+  }
+  await storageSet("history-summary", JSON.stringify(nextSummary));
+  return nextSummary;
 }
 
 // Calls YOUR backend (not Anthropic directly) so the API key never lives on the phone.
@@ -451,7 +467,7 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem
   );
 }
 
-function GoalsModal({ goals, onSave, onClose, onResetToday, foodDictionary = [], onRemoveFood }) {
+function GoalsModal({ goals, onSave, onClose, onResetToday, foodDictionary = [], onRemoveFood, onDeleteAll }) {
   const [draft, setDraft] = useState(goals);
 
   const field = (key, label, unit) => (
@@ -496,6 +512,12 @@ function GoalsModal({ goals, onSave, onClose, onResetToday, foodDictionary = [],
         >
           CLEAR TODAY'S MEALS
         </button>
+        <button
+          onClick={onDeleteAll}
+          style={{ width: "100%", background: "none", color: MACRO_COLORS.protein, border: `1px solid ${MACRO_COLORS.protein}`, padding: "10px 0", fontWeight: 700, fontSize: 12, letterSpacing: 0.5, cursor: "pointer", fontFamily: "'Archivo', sans-serif", marginTop: 8 }}
+        >
+          DELETE ALL HISTORY
+        </button>
 
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: MUTED, marginBottom: 6 }}>MY FOOD NAMES</div>
@@ -517,8 +539,19 @@ function GoalsModal({ goals, onSave, onClose, onResetToday, foodDictionary = [],
   );
 }
 
-function DayDetail({ date, onBack }) {
+function DayDetail({ date, onBack, onDayChanged }) {
   const [dayMeals, setDayMeals] = useState(null);
+
+  const handleDeleteMeal = async (meal) => {
+    if (!window.confirm("Delete this meal? This can't be undone.")) return;
+    const remaining = (dayMeals || []).filter((m) => m.id !== meal.id);
+    if (meal.photoPath) await deletePhoto(meal.photoPath);
+    setDayMeals(remaining);
+    try {
+      await storageSet(`day:${date}`, JSON.stringify(remaining));
+    } catch (e) {}
+    onDayChanged(date, remaining);
+  };
 
   useEffect(() => {
     (async () => {
@@ -567,7 +600,12 @@ function DayDetail({ date, onBack }) {
         <div key={meal.id} style={{ background: PAPER, border: `2px solid ${INK}`, marginBottom: 12, padding: 12, display: "flex", gap: 12 }}>
           <MealPhoto meal={meal} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>{meal.time}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>{meal.time}</div>
+              <button onClick={() => handleDeleteMeal(meal)} style={{ background: "none", border: "none", cursor: "pointer", color: INK, padding: 2 }} aria-label="Delete meal">
+                <Trash2 size={16} />
+              </button>
+            </div>
             <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 700, color: INK, lineHeight: 1.2 }}>
               {Math.round(sumMeal(meal.items).calories)} <span style={{ fontSize: 12, fontFamily: "'Archivo', sans-serif", fontWeight: 700, color: MUTED }}>KCAL</span>
             </div>
@@ -584,8 +622,21 @@ function DayDetail({ date, onBack }) {
   );
 }
 
-function TrendsView({ historySummary, goals }) {
+function TrendsView({ historySummary, goals, onDayChanged, onDeleteDays }) {
   const [selectedDate, setSelectedDate] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [checked, setChecked] = useState([]);
+
+  const toggleChecked = (date) =>
+    setChecked((prev) => (prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date]));
+
+  const handleDeleteChecked = async () => {
+    if (checked.length === 0) return;
+    if (!window.confirm(`Delete ${checked.length} day${checked.length !== 1 ? "s" : ""} of meals? This can't be undone.`)) return;
+    await onDeleteDays(checked);
+    setChecked([]);
+    setSelectMode(false);
+  };
   const days = useMemo(() => {
     const arr = [];
     for (let i = 13; i >= 0; i--) {
@@ -610,7 +661,7 @@ function TrendsView({ historySummary, goals }) {
   const loggedDays = days.filter((d) => d.logged);
   const avg = (key) => (loggedDays.length > 0 ? loggedDays.reduce((s, d) => s + d[key], 0) / loggedDays.length : 0);
 
-  if (selectedDate) return <DayDetail date={selectedDate} onBack={() => setSelectedDate(null)} />;
+  if (selectedDate) return <DayDetail date={selectedDate} onBack={() => setSelectedDate(null)} onDayChanged={onDayChanged} />;
 
   return (
     <div>
@@ -649,14 +700,33 @@ function TrendsView({ historySummary, goals }) {
       </div>
 
       <div>
-        <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED, marginBottom: 10 }}>DAY BY DAY</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED }}>DAY BY DAY</div>
+          {loggedDays.length > 0 && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {selectMode && (
+                <button onClick={handleDeleteChecked} disabled={checked.length === 0} style={{ background: checked.length ? MACRO_COLORS.protein : "#E8E4D8", color: PAPER, border: "none", padding: "4px 8px", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, cursor: checked.length ? "pointer" : "default", fontFamily: "'Archivo', sans-serif" }}>
+                  DELETE ({checked.length})
+                </button>
+              )}
+              <button onClick={() => { setSelectMode((s) => !s); setChecked([]); }} style={{ background: "none", border: `1px solid ${INK}`, padding: "4px 8px", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, cursor: "pointer", color: INK, fontFamily: "'Archivo', sans-serif" }}>
+                {selectMode ? "CANCEL" : "SELECT"}
+              </button>
+            </div>
+          )}
+        </div>
         {[...days].reverse().map((d) => (
           <div
             key={d.date}
-            onClick={() => d.logged && setSelectedDate(d.date)}
+            onClick={() => d.logged && (selectMode ? toggleChecked(d.date) : setSelectedDate(d.date))}
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px dashed #D8D3C4", fontFamily: "'Archivo', sans-serif", cursor: d.logged ? "pointer" : "default" }}
           >
-            <span style={{ fontSize: 12, color: INK, fontWeight: 600 }}>{d.label}</span>
+            <span style={{ fontSize: 12, color: INK, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+              {selectMode && d.logged && (
+                <span style={{ width: 14, height: 14, border: `1px solid ${INK}`, background: checked.includes(d.date) ? INK : PAPER, display: "inline-block" }} />
+              )}
+              {d.label}
+            </span>
             <span style={{ fontSize: 12, color: d.logged ? INK : "#C9C4B4", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
               {d.logged ? `${d.calories} kcal` : "No log"}
               {d.logged && <ChevronRight size={14} />}
@@ -889,6 +959,33 @@ export default function App() {
     );
   };
 
+  const handleDayChanged = (date, remainingMeals) => {
+    if (date === today) {
+      setMeals(remainingMeals);
+      return;
+    }
+    const totals = sumDay(remainingMeals);
+    const next = { ...historySummary, [date]: { ...totals, mealCount: remainingMeals.length } };
+    setHistorySummary(next);
+    storageSet("history-summary", JSON.stringify(next)).catch(() => {});
+  };
+
+  const handleDeleteDays = async (dateKeys) => {
+    const next = await deleteDays(dateKeys, historySummary);
+    setHistorySummary(next);
+    if (dateKeys.includes(today)) setMeals([]);
+  };
+
+  const handleDeleteAllHistory = async () => {
+    if (!window.confirm("Delete ALL meal history and photos? Your goals and food names will be kept. This can't be undone.")) return;
+    const allDays = Object.keys(historySummary);
+    if (!allDays.includes(today)) allDays.push(today);
+    const next = await deleteDays(allDays, historySummary);
+    setHistorySummary(next);
+    setMeals([]);
+    setShowGoals(false);
+  };
+
   const saveFoodDictionary = async (next) => {
     setFoodDictionary(next);
     try {
@@ -957,6 +1054,7 @@ export default function App() {
   };
 
   const handleResetToday = () => {
+    if (!window.confirm("Clear all of today's meals and photos? This can't be undone.")) return;
     meals.forEach((m) => m.photoPath && deletePhoto(m.photoPath));
     setMeals([]);
     setShowGoals(false);
@@ -1054,13 +1152,13 @@ export default function App() {
             </div>
           </>
         ) : tab === "trends" ? (
-          <TrendsView historySummary={historySummary} goals={goals} />
+          <TrendsView historySummary={historySummary} goals={goals} onDayChanged={handleDayChanged} onDeleteDays={handleDeleteDays} />
         ) : (
           <CoachView meals={meals} historySummary={historySummary} goals={goals} />
         )}
       </div>
 
-      {showGoals && <GoalsModal goals={goals} onSave={handleSaveGoals} onClose={() => setShowGoals(false)} onResetToday={handleResetToday} foodDictionary={foodDictionary} onRemoveFood={handleRemoveFood} />}
+      {showGoals && <GoalsModal goals={goals} onSave={handleSaveGoals} onClose={() => setShowGoals(false)} onResetToday={handleResetToday} foodDictionary={foodDictionary} onRemoveFood={handleRemoveFood} onDeleteAll={handleDeleteAllHistory} />}
     </div>
   );
 }
