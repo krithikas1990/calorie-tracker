@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   Camera, Trash2, Loader2, ChevronDown, ChevronUp, AlertCircle,
-  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight, Pencil,
+  Settings, Minus, Plus, RotateCcw, X, TrendingUp, CalendarDays, ChevronLeft, ChevronRight, Pencil, Check,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip, CartesianGrid, Cell } from "recharts";
 import { storageGet, storageSet } from "./storage.js";
@@ -158,6 +158,7 @@ function normalizeItems(rawItems) {
       carbs_g: it.carbs_g || 0,
       fat_g: it.fat_g || 0,
       fiber_g: it.fiber_g || 0,
+      needs_confirm: it.confident === false,
     };
   });
 }
@@ -225,7 +226,7 @@ function MacroBar({ label, grams, maxGrams, color }) {
   );
 }
 
-function EditableGramRow({ item, onChange, onReset, onRename }) {
+function EditableGramRow({ item, onChange, onReset, onRename, onConfirm }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(Math.round(item.estimated_grams)));
   const [editingName, setEditingName] = useState(false);
@@ -290,6 +291,17 @@ function EditableGramRow({ item, onChange, onReset, onRename }) {
       {renameStatus === "error" && (
         <div style={{ fontSize: 10, color: MACRO_COLORS.protein, marginTop: 2 }}>
           Couldn't look up that food. Check your connection and try again.
+        </div>
+      )}
+      {item.needs_confirm && !editingName && renameStatus !== "saving" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 11, color: MACRO_COLORS.carbs, fontWeight: 700 }}>
+          <span>Is this right?</span>
+          <button onClick={onConfirm} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: `1px solid ${INK}`, padding: "2px 6px", cursor: "pointer", fontSize: 10, fontWeight: 700, color: INK, fontFamily: "'Archivo', sans-serif" }}>
+            <Check size={11} /> YES
+          </button>
+          <button onClick={() => { setNameDraft(item.name); setRenameStatus(null); setEditingName(true); }} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: `1px solid ${INK}`, padding: "2px 6px", cursor: "pointer", fontSize: 10, fontWeight: 700, color: INK, fontFamily: "'Archivo', sans-serif" }}>
+            <Pencil size={11} /> RENAME
+          </button>
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
@@ -358,7 +370,7 @@ function MealPhoto({ meal }) {
   return <img src={src} alt="meal" onError={() => setFailed(true)} style={{ ...boxStyle, objectFit: "cover" }} />;
 }
 
-function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem }) {
+function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem, onConfirmItem }) {
   const [open, setOpen] = useState(false);
   const totals = useMemo(() => sumMeal(meal.items || []), [meal.items]);
 
@@ -396,6 +408,11 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem
               <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 12, color: "#4A4636", marginTop: 2 }}>
                 {(meal.items || []).map((i) => i.name).join(", ")}
               </div>
+              {(meal.items || []).some((i) => i.needs_confirm) && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: MACRO_COLORS.carbs, marginTop: 2 }}>
+                  {(meal.items || []).filter((i) => i.needs_confirm).length} item(s) to confirm
+                </div>
+              )}
               <button
                 onClick={() => setOpen((o) => !o)}
                 style={{ marginTop: 6, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: INK, padding: 0 }}
@@ -423,7 +440,7 @@ function MealCard({ meal, onDelete, onUpdateItemGrams, onResetItem, onRenameItem
               TAP A WEIGHT TO CORRECT THE ESTIMATE
             </div>
             {meal.items.map((it, idx) => (
-              <EditableGramRow key={idx} item={it} onChange={(g) => onUpdateItemGrams(meal.id, idx, g)} onReset={() => onResetItem(meal.id, idx)} onRename={(name) => onRenameItem(meal.id, idx, name)} />
+              <EditableGramRow key={idx} item={it} onChange={(g) => onUpdateItemGrams(meal.id, idx, g)} onReset={() => onResetItem(meal.id, idx)} onRename={(name) => onRenameItem(meal.id, idx, name)} onConfirm={() => onConfirmItem(meal.id, idx)} />
             ))}
           </div>
 
@@ -885,6 +902,16 @@ export default function App() {
     saveFoodDictionary(foodDictionary.filter((f) => f.from !== fromName));
   };
 
+  const handleConfirmItem = (mealId, itemIdx) => {
+    setMeals((prev) =>
+      prev.map((m) => {
+        if (m.id !== mealId) return m;
+        const items = m.items.map((it, idx) => (idx === itemIdx ? { ...it, needs_confirm: false } : it));
+        return { ...m, items };
+      })
+    );
+  };
+
   const handleRenameItem = async (mealId, itemIdx, newName) => {
     const per100 = await fetchNutrition(newName);
     const meal = meals.find((m) => m.id === mealId);
@@ -911,7 +938,7 @@ export default function App() {
         if (m.id !== mealId) return m;
         const items = m.items.map((it, idx) =>
           idx === itemIdx
-            ? recomputeItem({ ...it, name: newName, ai_name: it.ai_name || it.name, perGram }, it.estimated_grams)
+            ? recomputeItem({ ...it, name: newName, ai_name: it.ai_name || it.name, perGram, needs_confirm: false }, it.estimated_grams)
             : it
         );
         return { ...m, items };
@@ -1019,7 +1046,7 @@ export default function App() {
             )}
 
             {meals.map((meal) => (
-              <MealCard key={meal.id} meal={meal} onDelete={handleDelete} onUpdateItemGrams={handleUpdateItemGrams} onResetItem={handleResetItem} onRenameItem={handleRenameItem} />
+              <MealCard key={meal.id} meal={meal} onDelete={handleDelete} onUpdateItemGrams={handleUpdateItemGrams} onResetItem={handleResetItem} onRenameItem={handleRenameItem} onConfirmItem={handleConfirmItem} />
             ))}
 
             <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 10, color: "#A39E8F", marginTop: 20, textAlign: "center", lineHeight: 1.5 }}>

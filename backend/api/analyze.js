@@ -11,11 +11,11 @@ For every distinct food item visible:
 Respond with ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
 {
   "items": [
-    {"name": "string", "estimated_grams": number, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "fiber_g": number}
+    {"name": "string", "estimated_grams": number, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "fiber_g": number, "confident": boolean}
   ],
   "note": "one short sentence on estimation confidence or ambiguity"
 }
-Numbers must be plain numbers (no units, no strings). If you cannot identify any food, return {"items": [], "note": "explain why"}.`;
+Numbers must be plain numbers (no units, no strings). Set "confident" to false when you are unsure what the dish is (for example a regional dish that could be several things, or a mixed dish you cannot see clearly); set it to true when the identification is clear. If the dish matches a household name you were given, set confident to true. If you cannot identify any food, return {"items": [], "note": "explain why"}.`;
 
 function buildUserText(knownFoods) {
   let text = "Analyze this meal and return the JSON as instructed.";
