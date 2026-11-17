@@ -7,12 +7,31 @@ This project has two parts:
 
 ## Features
 
-- **Photo-based meal logging** — take a photo of a plate, Claude's vision API identifies each food item and estimates calories/protein/carbs/fat/fiber from visual portion cues (plate size, utensils, etc.)
-- **Editable estimates** — tap any weight to correct the AI's guess if it looks off, with a one-tap reset back to the original estimate
-- **Daily goals & progress** — set your own calorie/macro targets, see progress bars fill in as you log meals
-- **14-day trends** — a bar chart of daily calories against your goal, plus average macros on days you actually logged something
-- **AI nutrition coach (Coach tab)** — ask questions in plain English about your actual logged data ("how was my protein this week?"). Answers are grounded strictly in your real logged meals and history — it will say so honestly rather than invent numbers if you haven't logged anything yet.
-- **Private by design** — your Anthropic API key lives only on the backend server (Vercel), never on the phone; all your meal data is stored locally on-device, not in any cloud database
+**Logging meals**
+- **Photo-based logging:** take a photo with the camera or pick one from the gallery. Claude's vision API identifies each food item and estimates calories, protein, carbs, fat and fiber from visual portion cues (plate size, utensils).
+- **Editable estimates:** tap any weight to correct the AI's guess, with a one-tap reset to the original estimate.
+- **Rename and recalculate:** if Claude names a dish wrongly, rename it (e.g. to "rasam") and the app looks up nutrition for the corrected dish, keeping the same weight.
+- **Confirmation prompts:** items Claude is unsure about are flagged with "Is this right?", so you can confirm or rename them.
+
+**Learning your food**
+- **Personal food dictionary:** every rename is remembered and sent with future photos, so Claude learns your household's names for dishes. Review or remove entries in settings.
+
+**History and insights**
+- **Daily goals and progress:** set calorie and macro targets and watch progress bars fill as you log.
+- **14-day trends:** a bar chart of daily calories against your goal, plus average macros on logged days. Tap any day to see its meals.
+- **Calendar:** a month view with logged days marked; tap a day to open its meals.
+- **History cleanup:** delete single meals, selected days, or all history (goals and food names are kept). Every delete asks for confirmation.
+- **AI nutrition coach (Coach tab):** ask plain-English questions about your logged data. Answers are grounded in your real meals; it says so honestly when data is missing.
+
+**Private by design**
+- Your Anthropic API key lives only on the backend (Vercel), never on the phone.
+- Meals, photos and your food dictionary are stored on the device, not in a cloud database. Photos are saved as files so they survive app restarts.
+
+### Backend endpoints
+
+- `api/analyze.js`: analyses a meal photo (uses your food dictionary and flags uncertain items)
+- `api/nutrition.js`: looks up nutrition per 100g for a renamed dish
+- `api/insights.js`: answers Coach questions from your logged data
 
 Follow the phases in order. Don't skip ahead — each one depends on the last working.
 
