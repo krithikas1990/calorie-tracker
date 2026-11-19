@@ -821,13 +821,17 @@ function TrendsView({ historySummary, goals, onDayChanged, onDeleteDays }) {
   );
 }
 
-function CoachView({ meals, historySummary, goals }) {
-  const [messages, setMessages] = useState([
+function CoachView({ meals, historySummary, goals, savedMessages, onMessagesChange }) {
+  const [messages, setMessages] = useState(savedMessages || [
     { role: "assistant", text: "Ask me anything about your logged meals — like \"how was my protein this week?\" or \"what should I eat more of?\"" },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (onMessagesChange) onMessagesChange(messages);
+  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -940,12 +944,38 @@ export default function App() {
   const [meals, setMeals] = useState([]);
   const [goals, setGoals] = useState(DEFAULT_GOALS);
   const [foodDictionary, setFoodDictionary] = useState([]);
+  const [coachMessages, setCoachMessages] = useState(null);
   const [historySummary, setHistorySummary] = useState({});
   const [tab, setTab] = useState("today");
   const [showGoals, setShowGoals] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const fileInputRef = useRef(null);
-  const today = dateKey();
+  const [today, setToday] = useState(() => dateKey());
+
+  // If the app stays open past midnight, switch to the new day instead of
+  // saving yesterday's meals under the new date.
+  useEffect(() => {
+    const checkDate = async () => {
+      const now = dateKey();
+      if (now === today) return;
+      setLoaded(false);
+      let nextMeals = [];
+      try {
+        const d = await storageGet(`day:${now}`);
+        if (d && d.value) nextMeals = JSON.parse(d.value);
+      } catch (e) {}
+      setToday(now);
+      setMeals(nextMeals);
+      setLoaded(true);
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") checkDate(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(checkDate, 60000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(timer);
+    };
+  }, [today]);
 
   useEffect(() => {
     (async () => {
@@ -1251,7 +1281,7 @@ export default function App() {
                 <Upload size={18} /> FROM GALLERY
               </button>
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelected} />
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelected} />
 
             <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED, marginBottom: 10 }}>MEALS</div>
 
@@ -1274,7 +1304,7 @@ export default function App() {
         ) : tab === "calendar" ? (
           <CalendarView historySummary={historySummary} onDayChanged={handleDayChanged} />
         ) : (
-          <CoachView meals={meals} historySummary={historySummary} goals={goals} />
+          <CoachView meals={meals} historySummary={historySummary} goals={goals} savedMessages={coachMessages} onMessagesChange={setCoachMessages} />
         )}
       </div>
 

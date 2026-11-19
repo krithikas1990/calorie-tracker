@@ -77,7 +77,9 @@ export default async function handler(req, res) {
     if (!textBlock) return res.status(502).json({ error: "No response from model" });
 
     const cleaned = textBlock.text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return res.status(502).json({ error: "Model did not return JSON" });
+    const parsed = JSON.parse(match[0]);
     return res.status(200).json(parsed);
   } catch (err) {
     return res.status(500).json({ error: err.message || "Server error" });
