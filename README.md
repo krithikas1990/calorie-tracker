@@ -156,9 +156,11 @@ If you add a new file to `backend/api/` (like a new endpoint), it won't show up 
 
 ```
 cd backend
-vercel --prod
+vercel --prod --token "$VERCEL_TOKEN"
 ```
 This pushes the current `backend/` folder to your existing Vercel project (same URL, no `.env` changes needed) — no need to reconfigure anything, just run this command whenever you add or change backend code.
+
+`$VERCEL_TOKEN` is a Vercel access token saved in your shell settings (`~/.zshrc`), so deploys never ask you to log in. Create one at vercel.com/account/tokens. Never commit it or share it.
 
 ## If something goes wrong
 
