@@ -1,3 +1,5 @@
+import { allowRequest } from "../lib/rateLimit.js";
+
 // This runs on Vercel's servers, NOT on the phone. This is what keeps your
 // API key private -- the app never sees it, it only talks to this endpoint.
 
@@ -39,6 +41,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!allowRequest(req, res, "analyze", 30)) return;
 
   const { image, mediaType, knownFoods } = req.body || {};
   if (!image) return res.status(400).json({ error: "No image provided" });

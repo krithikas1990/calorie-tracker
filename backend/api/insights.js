@@ -1,3 +1,5 @@
+import { allowRequest } from "../lib/rateLimit.js";
+
 // This runs on Vercel's servers, NOT on the phone — same pattern as analyze.js.
 // Takes a question plus a summary of the user's recent logged data, and asks
 // Claude to answer as a grounded nutrition coach (not a generic chatbot).
@@ -21,10 +23,13 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!allowRequest(req, res, "insights", 60)) return;
 
   const { question, context } = req.body || {};
   if (!question) return res.status(400).json({ error: "No question provided" });
   if (!context) return res.status(400).json({ error: "No context provided" });
+  if (String(question).length > 1000) return res.status(400).json({ error: "Question is too long" });
+  if (JSON.stringify(context).length > 100000) return res.status(400).json({ error: "Too much data sent" });
 
   const userMessage = `Goals: ${JSON.stringify(context.goals)}
 

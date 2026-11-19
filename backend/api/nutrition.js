@@ -1,3 +1,5 @@
+import { allowRequest } from "../lib/rateLimit.js";
+
 // Looks up typical nutrition per 100g for a food name.
 // Used when the user renames an item the AI identified wrongly.
 
@@ -14,6 +16,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!allowRequest(req, res, "nutrition", 60)) return;
 
   const { name } = req.body || {};
   if (!name || typeof name !== "string") return res.status(400).json({ error: "No food name provided" });
